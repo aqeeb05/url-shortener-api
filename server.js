@@ -6,24 +6,36 @@ const mongoose = require('mongoose');
 const { nanoid } = require('nanoid');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
-const Url = require('./models/Url'); // Import our database blueprint
-const User = require('./models/User'); // Import our User database blueprint
+const Url = require('./models/url'); // Import our database blueprint
+const User = require('./models/user'); // Import our User database blueprint
 
 
 const app = express();
+
+//Middleware
 app.use(express.json());
+app.use(cookieParser());
+
+//Enable CORE for live Server with credentials
+app.use(cors({
+    origin:'http://localhost:5500',    
+    credentials: true
+}));
+
 
 // Connect to MongoDB Atlas
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('Database connected successfully to MongoDB Atlas!'))
     .catch(err => console.error('Database connection error:', err));
 
-// ==========================================
-// USER AUTHENTICATION ENDPOINTS
-// ==========================================
 
-// 1. REGISTER USER: Hashes password and saves account to the cloud
+
+
+
+
 app.post('/api/auth/register', async (req, res) => {
     const { name, email, password } = req.body;
 
@@ -32,17 +44,17 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     try {
-        // Check if user already exists
+        
         let userExists = await User.findOne({ email });
         if (userExists) {
             return res.status(400).json({ error: 'A user with this email already exists' });
         }
 
-        // Hash the password for security
+        
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
-        // Create and save user
+        
         const newUser = new User({
             name,
             email,
@@ -58,7 +70,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// 2. LOGIN USER: Verifies credentials and hands out a JWT token
+
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
 
@@ -67,28 +79,36 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     try {
-        // Look up the user
+        
         const user = await User.findOne({ email });
         if (!user) {
             return res.status(400).json({ error: 'Invalid credentials' });
         }
 
-        // Compare the submitted password with the encrypted hash
+        
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(400).json({ error: 'Invalid credentials' });
         }
 
-        // Create a secure JSON Web Token
+        
         const token = jwt.sign(
             { userId: user._id },
             process.env.JWT_SECRET,
-            { expiresIn: '7d' } // Token remains active for 1 week
+            { expiresIn: '7d' } 
         );
+
+        
+        res.cookie('token', token, {
+            httpOnly: true, 
+            secure: false, 
+            sameSite: 'lax', 
+            path: '/', 
+            maxAge: 7 * 24 * 60 * 60 * 1000 
+        });
 
         res.json({
             message: 'Login successful!',
-            token: token,
             user: { id: user._id, name: user.name, email: user.email }
         });
 
@@ -98,32 +118,37 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// ==========================================
-// AUTHENTICATION MIDDLEWARE (The Gatekeeper)
-// ==========================================
-const authMiddleware = (req, res, next) => {
-    // Get the token from the request header
-    const token = req.header('Authorization')?.replace('Bearer ', '');
 
+app.post('/api/auth/logout', (req, res) => {
+    res.clearCookie('token', {path:'/'}); 
+    res.json({ message: 'Logged out Successfully' });
+});
+
+
+
+
+const authMiddleware = (req, res, next) => {
+    
+    const token = req.cookies.token;
     if (!token) {
         return res.status(401).json({ error: 'No token provided, authorization denied' });
     }
 
     try {
-        // Verify the token signature using our secret key
+        
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
         
-        // Attach the logged-in user's ID directly to the request object
         req.userId = decoded.userId;
-        
-        next(); // Move on to the actual route handler logic
+
+        next(); 
     } catch (error) {
         res.status(401).json({ error: 'Token is invalid or expired' });
     }
 };
 
-// 1. SHORTEN ROUTE: Saves link permanently to the cloud database
-app.post('/shorten', authMiddleware, async (req, res) => {
+
+app.post('/api/shorten', authMiddleware, async (req, res) => {
     const { longUrl } = req.body;
 
     if (!longUrl) {
@@ -135,7 +160,7 @@ app.post('/shorten', authMiddleware, async (req, res) => {
         const newUrl = new Url({
             originalUrl: longUrl,
             shortCode: shortCode,
-            user: req.userId // Associate the link with the logged-in user
+            user: req.userId 
         });
 
         await newUrl.save();
@@ -151,11 +176,16 @@ app.post('/shorten', authMiddleware, async (req, res) => {
     }
 });
 
-// 2. DASHBOARD ROUTE: Must be ABOVE the generic /:shortCode route!
+
 app.get('/api/dashboard', authMiddleware, async (req, res) => {
     try {
+        const user = await User.findById(req.userId);
         const allUrls = await Url.find({ user: req.userId });
         res.json({
+            user: {
+                username: user.name,
+                email: user.email
+            },
             count: allUrls.length,
             urls: allUrls
         });

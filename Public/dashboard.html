@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard - URL Shortener</title>
+  <style>
+    * { box-sizing: border-box; font-family: sans-serif; }
+    body { background: #0f172a; color: #fff; min-height: 100vh; padding: 20px; }
+    .container { max-width: 900px; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+    h1 { color: #38bdf8; }
+    .logout-btn { background: #ef4444; padding: 10px 20px; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: bold; }
+    .logout-btn:hover { background: #dc2626; }
+    .links-grid { display: grid; gap: 15px; }
+    .link-card { background: #1e293b; padding: 16px; border-radius: 8px; border: 1px solid #334155; }
+    .link-card p { margin: 8px 0; font-size: 0.9rem; }
+    .link-card .original { color: #94a3b8; word-break: break-all; }
+    .link-card .short { color: #38bdf8; font-weight: bold; }
+    .link-card .clicks { color: #10b981; }
+    .link-card button { background: #0284c7; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+    .link-card button:hover { background: #0369a1; }
+    .error { color: #f87171; text-align: center; margin-top: 20px; }
+    .loading { text-align: center; color: #94a3b8; }
+    .create-new { background: #0284c7; padding: 12px 24px; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: bold; }
+    .create-new:hover { background: #0369a1; }
+    .header-container {
+    margin-bottom: 24px;
+}
+
+.user-greeting {
+    color: #94a3b8; /* Subtle slate gray color */
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-bottom: 4px;
+    text-transform: capitalize; /* Ensures the name starts with a capital letter */
+}
+
+.main-heading {
+    font-size: 2rem;
+    color: #38bdf8; /* Your existing bright cyan color */
+}
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <h2 id="userGreeting" class="user-greeting"></h2>
+        <h1>Your Shortened Links</h1>
+        <p id="userInfo" style="color: #94a3b8;"></p>
+      </div>
+      <div>
+        <button class="create-new" onclick="window.location.href='index.html'">+ New Link</button>
+        <button class="logout-btn" onclick="logout()">Logout</button>
+      </div>
+    </div>
+
+    <div id="linksContainer" class="loading">Loading your links...</div>
+    <div id="error" class="error"></div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:5000';
+    const TIMEOUT = 10000; // 10 seconds
+
+    async function fetchWithTimeout(url, options = {}) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);
+      
+      try {
+        const res = await fetch(url, { ...options, signal: controller.signal });
+        return res;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    async function loadDashboard() {
+      try {
+        console.log('Fetching dashboard data...');
+        const res = await fetchWithTimeout(`${API_BASE}/api/dashboard`, {
+          method: 'GET',
+          credentials: 'include'
+        });
+
+        console.log('Dashboard response status:', res.status);
+
+        if (res.status === 401) {
+          console.log('User not authenticated. Redirecting to login...');
+          window.location.href = 'login.html';
+          return;
+        }
+
+        if (!res.ok) {
+          throw new Error('Failed to load dashboard');
+        }
+
+        const data = await res.json();
+        displayUserGreeting(data.user);
+        displayLinks(data.urls);
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          document.getElementById('error').textContent = 'Request timeout. Please refresh the page.';
+        } else {
+          document.getElementById('error').textContent = err.message;
+        }
+      }
+    }
+
+    function displayUserGreeting(user) {
+      if (user && user.username) {
+        const greetingElement = document.getElementById('userGreeting');
+        greetingElement.textContent = `Welcome back, ${user.username}!`;
+      }
+    }
+
+    function displayLinks(urls) {
+      const container = document.getElementById('linksContainer');
+      container.innerHTML = '';
+
+      if (urls.length === 0) {
+        container.innerHTML = '<p style="text-align: center; color: #94a3b8;">No shortened links yet. <a href="index.html" style="color: #38bdf8;">Create one</a></p>';
+        return;
+      }
+
+      urls.forEach(url => {
+        const card = document.createElement('div');
+        card.className = 'link-card';
+        
+        const shortUrl = `${API_BASE}/${url.shortCode}`;
+        
+        const titlePrimary = document.createElement('p');
+        titlePrimary.innerHTML = '<strong>Original URL:</strong>';
+        card.appendChild(titlePrimary);
+        
+        const originalUrlEl = document.createElement('p');
+        originalUrlEl.className = 'original';
+        originalUrlEl.textContent = url.originalUrl;
+        card.appendChild(originalUrlEl);
+        
+        const titleShort = document.createElement('p');
+        titleShort.innerHTML = '<strong>Short URL:</strong>';
+        card.appendChild(titleShort);
+        
+        const shortUrlEl = document.createElement('p');
+        shortUrlEl.className = 'short';
+        shortUrlEl.textContent = shortUrl;
+        card.appendChild(shortUrlEl);
+        
+        const clicksEl = document.createElement('p');
+        clicksEl.className = 'clicks';
+        clicksEl.textContent = `Clicks: ${url.clicks}`;
+        card.appendChild(clicksEl);
+        
+        const dateEl = document.createElement('p');
+        dateEl.style.fontSize = '0.8rem';
+        dateEl.style.color = '#64748b';
+        dateEl.textContent = `Created: ${new Date(url.createdAt).toLocaleDateString()}`;
+        card.appendChild(dateEl);
+        
+        const button = document.createElement('button');
+        button.textContent = 'Copy Link';
+        button.onclick = () => copyLink(shortUrl);
+        card.appendChild(button);
+        
+        container.appendChild(card);
+      });
+    }
+
+    function copyLink(link) {
+      navigator.clipboard.writeText(link);
+      alert('Link copied to clipboard!');
+    }
+
+    function logout() {
+      fetchWithTimeout(`${API_BASE}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include'
+      }).then(res => {
+        if (res.ok) {
+          window.location.href = 'login.html';
+        } else {
+          console.error('Logout failed');
+          alert('Logout failed. Please try again.');
+        }
+      }).catch(err => {
+        console.error('Logout error:', err);
+        alert('Logout error. Please try again.');
+      });
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>
